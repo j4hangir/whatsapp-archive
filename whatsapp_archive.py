@@ -13,11 +13,11 @@ import re
 
 # Format of the standard WhatsApp export line. This is likely to change in the
 # future and so this application will need to be updated.
-DATE_RE = '(?P<date>[\d/-]+)'
+DATE_RE = '(?P<date>[\d/\-.]+)'
 TIME_RE = '(?P<time>[\d:]+( [AP]M)?)'
 DATETIME_RE = '\[?' + DATE_RE + ',? ' + TIME_RE + '\]?'
 SEPARATOR_RE = '( - |: | )'
-NAME_RE = '(?P<name>[^:]+)'
+NAME_RE = '(?P<name>[^:]+?)'
 WHATSAPP_RE = (DATETIME_RE +
                SEPARATOR_RE +
                NAME_RE +
@@ -25,27 +25,48 @@ WHATSAPP_RE = (DATETIME_RE +
                '(?P<body>.*$)')
 
 FIRSTLINE_RE = (DATETIME_RE +
-               SEPARATOR_RE +
-               '(?P<body>.*$)')
+                SEPARATOR_RE +
+                '(?P<body>.*$)')
 
 
 class Error(Exception):
     """Something bad happened."""
 
 
+def replace_attachment(body):
+    attachment = re.search('(<attached: (.+?)>)', body)
+    if attachment:
+        file = attachment.group(2)
+        ext = file.split('.')[-1]
+        if ext in ['jpg', 'png', 'jpeg']:
+            ret = f'<a target="_blank" href="{file}"><img width="128" height="128" src="{file}" /></a><br>'
+        elif ext in ['opus']:
+            ret = f'<audio controls src="{file}" /><br>'
+        elif ext in ['mp4']:
+            ret = f'<video controls src="{file}" /><br>'
+        else:
+            ret = f'<a target="_blank" href="{file}" />{file}</a>' #attachment.group(1)
+        body = body.replace(attachment.group(1), ret)
+    return body
+
+
 def ParseLine(line):
     """Parses a single line of WhatsApp export file."""
     m = re.match(WHATSAPP_RE, line)
     if m:
+        body = replace_attachment(m.group('body'))
+        
         d = dateutil.parser.parse("%s %s" % (m.group('date'),
-            m.group('time')), dayfirst=True)
-        return d, m.group('name'), m.group('body')
+                                             m.group('time')), dayfirst=True)
+        return d, m.group('name'), body
     # Maybe it's the first line which doesn't contain a person's name.
     m = re.match(FIRSTLINE_RE, line)
     if m:
+        body = replace_attachment(m.group('body'))
+
         d = dateutil.parser.parse("%s %s" % (m.group('date'),
-            m.group('time')), dayfirst=True)
-        return d, "nobody", m.group('body')
+                                             m.group('time')), dayfirst=True)
+        return d, "nobody", body
     return None
 
 
@@ -70,8 +91,8 @@ def IdentifyMessages(lines):
         else:
             if msg_date is None:
                 raise Error("Can't parse the first line: " + repr(line) +
-                        ', regexes are FIRSTLINE_RE=' + repr(FIRSTLINE_RE) +
-                        ' and WHATSAPP_RE=' + repr(WHATSAPP_RE))
+                            ', regexes are FIRSTLINE_RE=' + repr(FIRSTLINE_RE) +
+                            ' and WHATSAPP_RE=' + repr(WHATSAPP_RE))
             msg_body += '\n' + line.strip()
     # The last message remains. Let's add it, if it exists.
     if msg_date is not None:
@@ -84,12 +105,17 @@ def TemplateData(messages, input_filename):
     Returns:
         A dictionary of values.
     """
+    user_idx = {}
+    idx = 1
     by_user = []
     file_basename = os.path.basename(input_filename)
     for user, msgs_of_user in itertools.groupby(messages, lambda x: x[1]):
+        if user not in user_idx:
+            user_idx[user] = idx
+            idx += 1
         by_user.append((user, list(msgs_of_user)))
     return dict(by_user=by_user, input_basename=file_basename,
-            input_full_path=input_filename)
+                input_full_path=input_filename, user_idx=user_idx)
 
 
 def FormatHTML(data):
@@ -126,23 +152,95 @@ def FormatHTML(data):
             span.date {
                 color: gray;
             }
+            a {
+  color: hotpink;
+}
+
+.chatbox {
+    width: 100%;
+    margin-bottom: 10px;
+    background: #bfbfbf;
+}
+
+.u1 {
+    background: #0A1518 !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u1 span {
+    color: #fffb00 !important;
+}
+
+.u2 {
+    background: #423103 !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u2 span {
+    color: #fffb00 !important;
+}
+
+.u3 {
+    background: #707010 !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u3 span {
+    color: #fffb00 !important;
+}
+
+.u5 {
+    background: #0D376E !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u5 span {
+    color: #fffb00 !important;
+}
+
+.u6 {
+    background: #692D6E !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u6 span {
+    color: #fffb00 !important;
+}
+
+.u7 {
+    background: #413A6E !important;
+    color: white;
+    font-weight: bold;
+}
+.chatbox.u7 span {
+    color: #fffb00 !important;
+}
+
+.chatbox span {
+    padding-bottom: 5px;
+    color: darkred;
+    font-weight: bold;
+}
+
+
+
         </style>
     </head>
     <body>
         <h1>{{ input_basename }}</h1>
-        <ol class="users">
+        <div class="container">
         {% for user, messages in by_user %}
-            <li>
-            <span class="username">{{ user }}</span>
-            <span class="date">{{ messages[0][0] }}</span>
-            <ol class="messages">
+    <div class="chatbox u{{ user_idx[user] }}">
+            <div class="user">
+            <span class="username" style="margin-left: 15px">{{ user }}</span>
+            <span class="date" style="margin-left: 15px">{{ messages[0][0] }}</span>
             {% for message in messages %}
-                <li>{{ message[2] | e }}</li>
+                <div style="margin-left: 20px">{{ message[2] }}</div><br>
             {% endfor %}
-            </ol>
-            </li>
+            </div>
+      </div>
         {% endfor %}
-        </ol>
+        </div>
     </body>
     </html>
     """
@@ -152,12 +250,15 @@ def FormatHTML(data):
 def main():
     logging.basicConfig(level=logging.INFO)
     parser = argparse.ArgumentParser(description='Produce a browsable history '
-            'of a WhatsApp conversation')
+                                                 'of a WhatsApp conversation')
     parser.add_argument('-i', dest='input_file', required=True)
     parser.add_argument('-o', dest='output_file', required=True)
     args = parser.parse_args()
     with open(args.input_file, 'rt', encoding='utf-8-sig') as fd:
-        messages = IdentifyMessages(fd.readlines())
+        tmp = []
+        for line in fd.readlines():
+            tmp.append(replace_attachment(line))
+        messages = IdentifyMessages(tmp)
     template_data = TemplateData(messages, args.input_file)
     HTML = FormatHTML(template_data)
     with open(args.output_file, 'w', encoding='utf-8') as fd:
